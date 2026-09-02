@@ -1,0 +1,27 @@
+{
+  "name": "business-messaging-suite",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Multi-tenant WhatsApp engagement platform with AI-assisted triage and a visual automation builder.",
+  "packageManager": "pnpm@9.7.0",
+  "scripts": {
+    "dev:api": "pnpm --filter @business-messaging-suite/api start:dev",
+    "dev:web": "pnpm --filter @business-messaging-suite/web dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "prisma:generate": "pnpm --filter @business-messaging-suite/api prisma:generate",
+    "prisma:migrate": "pnpm --filter @business-messaging-suite/api prisma:migrate",
+    "prisma:studio": "pnpm --filter @business-messaging-suite/api prisma:studio",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "husky": "^9.1.4",
+    "lint-staged": "^15.2.9"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
