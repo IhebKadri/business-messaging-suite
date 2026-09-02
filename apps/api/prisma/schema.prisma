@@ -1,0 +1,304 @@
+// Business Messaging Suite data model.
+//
+// Multi-tenancy strategy: shared database, row-level isolation.
+// Every tenant-scoped table carries a `tenantId` column, and reads/writes
+// are forced through a Prisma Client Extension (see src/common/prisma/
+// tenant-scoped-prisma.ts) that injects `WHERE tenantId = :current` on
+// every query. This is enforced at the data-access layer, not trusted to
+// be remembered in each service method.
+//
+// Why row-level over schema-per-tenant: at this scale (SMB SaaS), a single
+// schema keeps migrations, connection pooling, and cross-tenant admin
+// queries simple. Schema-per-tenant buys stronger isolation at the cost of
+// migration fan-out and connection overhead — the right call only once
+// tenant count or compliance requirements justify it.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy & Identity
+// ---------------------------------------------------------------------------
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  plan      Plan     @default(FREE)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users            User[]
+  whatsappAccounts WhatsappAccount[]
+  contacts         Contact[]
+  tags             Tag[]
+  conversations    Conversation[]
+  campaigns        Campaign[]
+  flows            Flow[]
+
+  @@map("tenants")
+}
+
+enum Plan {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+model User {
+  id           String   @id @default(cuid())
+  tenantId     String
+  email        String
+  passwordHash String
+  name         String
+  role         UserRole @default(AGENT)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant               Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignedConversations Conversation[] @relation("AssignedAgent")
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("users")
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  AGENT
+}
+
+// ---------------------------------------------------------------------------
+// WhatsApp connection
+// ---------------------------------------------------------------------------
+
+model WhatsappAccount {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  displayPhoneNumber String
+  phoneNumberId      String   @unique // Meta's phone_number_id
+  wabaId             String   // WhatsApp Business Account ID
+  accessTokenEncrypted String  // encrypted at rest, see CryptoService
+  webhookVerifyToken String
+  status             AccountStatus @default(PENDING)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  @@index([tenantId])
+  @@map("whatsapp_accounts")
+}
+
+enum AccountStatus {
+  PENDING
+  CONNECTED
+  ERROR
+}
+
+// ---------------------------------------------------------------------------
+// Contacts
+// ---------------------------------------------------------------------------
+
+model Contact {
+  id          String   @id @default(cuid())
+  tenantId    String
+  waId        String   // WhatsApp user ID (phone in international format, no +)
+  name        String?
+  attributes  Json     @default("{}") // arbitrary custom fields for segmentation
+  optedOutAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tags          ContactTag[]
+  conversations Conversation[]
+  campaignRecipients CampaignRecipient[]
+
+  @@unique([tenantId, waId])
+  @@index([tenantId])
+  @@map("contacts")
+}
+
+model Tag {
+  id       String @id @default(cuid())
+  tenantId String
+  name     String
+  color    String @default("#6366f1")
+
+  tenant   Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contacts ContactTag[]
+
+  @@unique([tenantId, name])
+  @@map("tags")
+}
+
+model ContactTag {
+  contactId String
+  tagId     String
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, tagId])
+  @@map("contact_tags")
+}
+
+// ---------------------------------------------------------------------------
+// Conversations & Messages (the shared inbox)
+// ---------------------------------------------------------------------------
+
+model Conversation {
+  id                String   @id @default(cuid())
+  tenantId          String
+  contactId         String
+  whatsappAccountId String
+  status            ConversationStatus @default(OPEN)
+  assignedAgentId   String?
+  lastMessageAt     DateTime @default(now())
+
+  // AI-derived fields — populated asynchronously by the AI triage pipeline.
+  aiCategory  String? // e.g. "sales_lead" | "support" | "spam" | "other"
+  aiSentiment String? // "positive" | "neutral" | "negative"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact         Contact         @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  whatsappAccount WhatsappAccount @relation(fields: [whatsappAccountId], references: [id], onDelete: Cascade)
+  assignedAgent   User?           @relation("AssignedAgent", fields: [assignedAgentId], references: [id])
+  messages        Message[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, lastMessageAt])
+  @@map("conversations")
+}
+
+enum ConversationStatus {
+  OPEN
+  PENDING
+  CLOSED
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  tenantId       String
+  conversationId String
+  direction      MessageDirection
+  providerMessageId String? // Meta's wamid
+  type           MessageType @default(TEXT)
+  content        Json     // shape depends on `type`; see messaging/types
+  status         MessageStatus @default(QUEUED)
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, conversationId])
+  @@index([providerMessageId])
+  @@map("messages")
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  TEMPLATE
+  INTERACTIVE
+  DOCUMENT
+}
+
+enum MessageStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+// ---------------------------------------------------------------------------
+// Broadcast campaigns
+// ---------------------------------------------------------------------------
+
+model Campaign {
+  id             String   @id @default(cuid())
+  tenantId       String
+  name           String
+  templateName   String   // approved WhatsApp template name
+  templateParams Json     @default("[]")
+  segmentTagIds  String[] // Tag ids used to build the recipient list
+  scheduledAt    DateTime?
+  status         CampaignStatus @default(DRAFT)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tenant     Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  recipients CampaignRecipient[]
+
+  @@index([tenantId, status])
+  @@map("campaigns")
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  SENDING
+  COMPLETED
+  FAILED
+}
+
+model CampaignRecipient {
+  id         String   @id @default(cuid())
+  campaignId String
+  contactId  String
+  status     MessageStatus @default(QUEUED)
+  sentAt     DateTime?
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact  Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, contactId])
+  @@map("campaign_recipients")
+}
+
+// ---------------------------------------------------------------------------
+// Automation flows (visual flow builder)
+// ---------------------------------------------------------------------------
+
+model Flow {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  isActive    Boolean  @default(false)
+  triggerType FlowTriggerType @default(KEYWORD)
+  triggerValue String  // keyword, or "*" for any message
+  // `definition` stores the React Flow graph: nodes + edges, JSON-serialized.
+  // The execution engine (flows/engine) interprets this at runtime rather
+  // than compiling it, so flows can be edited without a redeploy.
+  definition  Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, isActive])
+  @@map("flows")
+}
+
+enum FlowTriggerType {
+  KEYWORD
+  ANY_MESSAGE
+  NO_AGENT_RESPONSE
+}
