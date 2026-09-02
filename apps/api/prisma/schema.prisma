@@ -1,17 +1,8 @@
-// Business Messaging Suite data model.
-//
-// Multi-tenancy strategy: shared database, row-level isolation.
-// Every tenant-scoped table carries a `tenantId` column, and reads/writes
-// are forced through a Prisma Client Extension (see src/common/prisma/
-// tenant-scoped-prisma.ts) that injects `WHERE tenantId = :current` on
-// every query. This is enforced at the data-access layer, not trusted to
-// be remembered in each service method.
-//
-// Why row-level over schema-per-tenant: at this scale (SMB SaaS), a single
-// schema keeps migrations, connection pooling, and cross-tenant admin
-// queries simple. Schema-per-tenant buys stronger isolation at the cost of
-// migration fan-out and connection overhead — the right call only once
-// tenant count or compliance requirements justify it.
+// Row-level multi-tenancy: every tenant-scoped table has a tenantId column,
+// enforced via a Prisma extension (see common/prisma/prisma.service.ts)
+// instead of relying on each query remembering a WHERE clause.
+// Went with shared-schema over schema-per-tenant — simpler ops, fine for
+// our scale. Revisit if compliance ever forces stronger isolation.
 
 generator client {
   provider = "prisma-client-js"
@@ -284,10 +275,7 @@ model Flow {
   isActive    Boolean  @default(false)
   triggerType FlowTriggerType @default(KEYWORD)
   triggerValue String  // keyword, or "*" for any message
-  // `definition` stores the React Flow graph: nodes + edges, JSON-serialized.
-  // The execution engine (flows/engine) interprets this at runtime rather
-  // than compiling it, so flows can be edited without a redeploy.
-  definition  Json
+  definition  Json     // React Flow graph (nodes + edges), interpreted at runtime
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

@@ -8,12 +8,7 @@ import {
 import { Prisma, PrismaClient } from '@prisma/client';
 import { RequestContext } from '../context/request-context';
 
-// Every Prisma model below that carries a `tenantId` column must be listed
-// here. This is intentionally an explicit allowlist rather than something
-// inferred by introspection: a model added to schema.prisma without also
-// being added here is *never silently unscoped* — the extension simply
-// leaves it alone, and a reviewer added a tenantId column to see it in this
-// list too, in the same PR.
+// keep in sync with schema.prisma — anything with a tenantId column goes here
 const TENANT_SCOPED_MODELS = new Set([
   'User',
   'WhatsappAccount',
@@ -46,21 +41,9 @@ const WRITE_ACTIONS = new Set([
   'deleteMany',
 ]);
 
-/**
- * Injects `tenantId` into every query against a tenant-scoped model, using
- * the tenant currently bound in RequestContext.
- *
- * This is the enforcement point for multi-tenant isolation: individual
- * services call `this.prisma.contact.findMany(...)` exactly as they would
- * in a single-tenant app, and correctness doesn't depend on every
- * developer remembering to add `where: { tenantId }` by hand — a mistake
- * there is exactly how cross-tenant data leaks happen in real SaaS
- * incidents.
- *
- * `bypassTenantScope` exists for the narrow set of legitimate cross-tenant
- * operations (platform-admin tooling, the tenant-signup flow itself) and
- * must be used explicitly and sparingly — see PrismaService.asSystem().
- */
+// auto-injects tenantId into every query against a scoped model, pulled
+// from RequestContext. services just call prisma.contact.findMany(...)
+// like normal, no manual where: { tenantId } to forget.
 function tenantScopingExtension(getTenantId: () => string | undefined) {
   return Prisma.defineExtension((client) =>
     client.$extends({
@@ -134,13 +117,8 @@ export class PrismaService
     );
   }
 
-  /**
-   * Escape hatch for genuinely cross-tenant operations (tenant
-   * provisioning, platform admin). Named loudly on purpose so it stands
-   * out in a diff/review — every call site is a place tenant isolation is
-   * NOT being enforced by the framework and must be justified in code
-   * review.
-   */
+  // escape hatch for actual cross-tenant ops (admin tooling, signup flow).
+  // named loudly on purpose — every call site here skips tenant isolation.
   asSystem() {
     return this as PrismaClient;
   }
