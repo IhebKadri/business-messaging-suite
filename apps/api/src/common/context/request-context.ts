@@ -6,18 +6,9 @@ export interface RequestContextStore {
   userId?: string;
 }
 
-/**
- * Carries per-request state (tenant, user, request id) across the async
- * call stack without threading it through every function signature.
- *
- * This is what lets PrismaTenantExtension inject `WHERE tenantId = ...`
- * automatically: the extension reads the current tenant from here rather
- * than from an argument the caller could forget to pass.
- *
- * Deliberately NOT a global mutable — AsyncLocalStorage gives each
- * concurrent request its own isolated store, which is what makes this
- * safe under Node's concurrency model.
- */
+// tenant/user/request id, available anywhere in the call stack without
+// threading params through every function. Prisma's tenant extension
+// reads tenantId from here (common/prisma/prisma.service.ts).
 export class RequestContext {
   private static readonly storage = new AsyncLocalStorage<RequestContextStore>();
 
