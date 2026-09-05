@@ -5,9 +5,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 export class TenantsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // signup is inherently cross-tenant (no tenant exists yet), so this goes
-  // through asSystem() instead of prisma.scoped — one of the few legit
-  // uses of the bypass.
+  // signup is inherently cross-tenant (no tenant exists yet), so this goes through asSystem() instead of prisma.scoped — one of the few legit uses of the bypass.
   async provisionTenant(params: {
     companyName: string;
     ownerEmail: string;
