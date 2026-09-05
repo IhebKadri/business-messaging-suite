@@ -13,7 +13,6 @@ import { RequestContextMiddleware } from './common/middleware/request-context.mi
 import { AuthModule } from './modules/auth/auth.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
 
-// remaining feature modules get added here as each phase lands, see ROADMAP.
 
 @Module({
   imports: [
