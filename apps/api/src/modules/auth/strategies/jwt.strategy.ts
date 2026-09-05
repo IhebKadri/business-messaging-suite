@@ -10,7 +10,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      // no fallback — env validation already guarantees this exists
+      // no fallback, env validation already guarantees this exists
       secretOrKey: config.getOrThrow<string>('JWT_SECRET'),
     });
   }
