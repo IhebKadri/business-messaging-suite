@@ -6,16 +6,18 @@ import { LoggerModule } from 'nestjs-pino';
 import { PrometheusModule } from '@willsoto/nestjs-prometheus';
 import { BullModule } from '@nestjs/bullmq';
 import { randomUUID } from 'crypto';
+import { envValidationSchema } from './config/env.validation';
 
 import { PrismaModule } from './common/prisma/prisma.module';
 import { RequestContextMiddleware } from './common/middleware/request-context.middleware';
+import { AuthModule } from './modules/auth/auth.module';
+import { TenantsModule } from './modules/tenants/tenants.module';
 
-// feature modules get added here as each phase lands, see ROADMAP.
-// nothing under modules/ exists yet beyond empty folders.
+// remaining feature modules get added here as each phase lands, see ROADMAP.
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, validationSchema: envValidationSchema }),
 
     LoggerModule.forRoot({
       pinoHttp: {
@@ -40,6 +42,8 @@ import { RequestContextMiddleware } from './common/middleware/request-context.mi
     }),
 
     PrismaModule,
+    AuthModule,
+    TenantsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
